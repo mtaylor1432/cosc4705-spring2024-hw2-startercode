@@ -9,6 +9,7 @@ import argparse
 import logging
 import select
 import sys
+import threading
 import time
 import datetime
 import struct
@@ -43,6 +44,35 @@ def parseArgs():
     return args
 
 
+
+def receive_input(s):
+    while True:
+        # Receive the length of the message
+        length_data = s.recv(4)
+        if len(length_data) < 4:
+            print("Failed to get message length.")
+            return
+        # unpack
+        message_length = struct.unpack('!L', length_data)[0]
+    
+        # recieve message
+        json_data = b""
+        while len(json_data) < message_length:
+            remaining_data = s.recv(message_length - len(json_data))
+            if not remaining_data:
+                print("Connection closed.")
+                return
+            json_data += remaining_data
+   
+        # Parse the JSON data into an UnencryptedIMMessage
+        message = UnencryptedIMMessage()
+        message.parseJSON(json_data)
+    
+        # Display the message
+        print(f"Received message from {message.nick}: {message.msg} (sent at {message.timestamp})")
+
+ 
+
 def main():
     args = parseArgs()
 
@@ -58,21 +88,85 @@ def main():
     try:
         s = socket.create_connection((args.server,args.port))
         log.info("connected to server")
+        # start_client(args.server, args.port, args.nickname, log)
+
     except:
         log.error("cannot connect")
         exit(1)
 
     # here's a nice hint for you...
     readSet = [s] + [sys.stdin]
-
-    while True:
-        # HERE'S WHERE YOU NEED TO FILL IN STUFF
-
-        # DELETE THE NEXT TWO LINES. It's here now to prevent busy-waiting.
-        time.sleep(1)
-        log.info("not much happening here.  someone should rewrite this part of the code.")
-
+    
+    try:
+        nickname = args.nickname
+        log.info(f"Nickname has been set to: {nickname}")
         
+        while True:
+            readable, _, _ = select.select(readSet, [], [])
+            
+            for source in readable:
+                
+                if source == s:
+                    try:
+                       while True:
+                            # Receive the length of the message
+                            length_data = s.recv(4)
+                            if len(length_data) < 4:
+                                print("Failed to get message length.")
+                                return
+                            # unpack
+                            message_length = struct.unpack('!L', length_data)[0]
+    
+                            # recieve message
+                            json_data = b""
+                            while len(json_data) < message_length:
+                                remaining_data = s.recv(message_length - len(json_data))
+                                if not remaining_data:
+                                    print("Connection closed.")
+                                    return
+                                json_data += remaining_data
+   
+                            # Parse the JSON data into an UnencryptedIMMessage
+                            message = UnencryptedIMMessage()
+                            message.parseJSON(json_data)
+    
+                            # Display the message
+                            print(f"Received message from {message.nick}: {message.msg} (sent at {message.timestamp})")  
+                    except:
+                        log.error("Error receiving message.")
+                        return
+                        
+                    
+                elif source == sys.stdin:
+                    try:
+                        # get message from client
+                        user_input = sys.stdin.readline().strip()
+                        
+                        if not user_input:
+                            continue  # this skips empty input hopefully
+                        
+                        message = UnencryptedIMMessage(nickname=nickname, msg=user_input)
+
+                        # Serialize the message using the serialize method
+                        packed_size, json_data = message.serialize() 
+    
+                        # Send the packed size indicating the length of the message
+                        s.sendall(packed_size)
+    
+                        # Send the actual JSON message
+                        s.sendall(json_data)
+                        log.info(f"You: {message}")
+
+                        
+                    except Exception as e:
+                        log.error(f"Error sending message: {e}")
+                        return  
+
+    except:
+        log.error("something went wrong...")
+    finally:
+        s.close()
+        log.info("Connection closed.")
 
 if __name__ == "__main__":
     exit(main())
