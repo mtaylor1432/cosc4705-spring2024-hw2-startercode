@@ -41,37 +41,8 @@ def parseArgs():
         default='INFO',
         help='log level')
     args = parser.parse_args()
-    return args
+    return args    
 
-
-
-def receive_input(s):
-    while True:
-        # Receive the length of the message
-        length_data = s.recv(4)
-        if len(length_data) < 4:
-            print("Failed to get message length.")
-            return
-        # unpack
-        message_length = struct.unpack('!L', length_data)[0]
-    
-        # recieve message
-        json_data = b""
-        while len(json_data) < message_length:
-            remaining_data = s.recv(message_length - len(json_data))
-            if not remaining_data:
-                print("Connection closed.")
-                return
-            json_data += remaining_data
-   
-        # Parse the JSON data into an UnencryptedIMMessage
-        message = UnencryptedIMMessage()
-        message.parseJSON(json_data)
-    
-        # Display the message
-        print(f"Received message from {message.nick}: {message.msg} (sent at {message.timestamp})")
-
- 
 
 def main():
     args = parseArgs()
@@ -82,13 +53,12 @@ def main():
     level = logging.getLevelName(args.loglevel)
     
     log.setLevel(level)
-    log.info(f"running with {args}")
+    print(f"running with {args}")
     
     log.debug(f"connecting to server {args.server}")
     try:
         s = socket.create_connection((args.server,args.port))
-        log.info("connected to server")
-        # start_client(args.server, args.port, args.nickname, log)
+        print("connected to server")
 
     except:
         log.error("cannot connect")
@@ -99,7 +69,7 @@ def main():
     
     try:
         nickname = args.nickname
-        log.info(f"Nickname has been set to: {nickname}")
+        print(f"Nickname has been set to: {nickname}")
         
         while True:
             readable, _, _ = select.select(readSet, [], [])
@@ -108,12 +78,12 @@ def main():
                 
                 if source == s:
                     try:
-                       while True:
                             # Receive the length of the message
                             length_data = s.recv(4)
-                            if len(length_data) < 4:
+                            if not length_data:
                                 print("Failed to get message length.")
                                 return
+                            
                             # unpack
                             message_length = struct.unpack('!L', length_data)[0]
     
@@ -131,7 +101,7 @@ def main():
                             message.parseJSON(json_data)
     
                             # Display the message
-                            print(f"Received message from {message.nick}: {message.msg} (sent at {message.timestamp})")  
+                            print(f"{message.nick}: {message.msg}")  
                     except:
                         log.error("Error receiving message.")
                         return
@@ -145,6 +115,11 @@ def main():
                         if not user_input:
                             continue  # this skips empty input hopefully
                         
+                        if user_input.lower() == "quit":
+                            print("Quitting...")
+                            s.close() 
+                            return
+                        
                         message = UnencryptedIMMessage(nickname=nickname, msg=user_input)
 
                         # Serialize the message using the serialize method
@@ -155,7 +130,7 @@ def main():
     
                         # Send the actual JSON message
                         s.sendall(json_data)
-                        log.info(f"You: {message}")
+                        # print(f"You: {user_input}")
 
                         
                     except Exception as e:

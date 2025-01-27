@@ -5,6 +5,10 @@ import logging
 import select
 import struct
 import time
+import threading
+from message import UnencryptedIMMessage
+
+
 
 
 
@@ -25,7 +29,7 @@ def parseArgs():
 
 
 def main():
-    args = parseArgs()      # parse the command-line arguments
+    args = parseArgs()    
 
     # set up logging
     log = logging.getLogger("myLogger")
@@ -41,16 +45,80 @@ def main():
 
     clientList = []
 
-    while True:
+    try:
+        while True:
+            
+            readable, _, _ = select.select([serverSock] + clientList, [], [])
 
-        # HERE'S WHERE YOU NEED TO FILL IN STUFF
+            for source in readable:
+                # new connection coming
+                if source == serverSock:
+                    c, addr = serverSock.accept()
+                    log.info(f"New client connected: {addr}")
+                    clientList.append(c)
+                else:
+                    
+                    try:
+                        # Receive the message length
+                        length_data = source.recv(4)
+                        if not length_data:
+                            log.error("Client disconnected")
+                            clientList.remove(source)
+                            source.close()
+                            continue
+                        if len(length_data) < 4:
+                            log.error("Incomplete message length received")
+                            continue
 
-        # DELETE THE NEXT TWO LINES. It's here now to prevent busy-waiting.
-        time.sleep(1)
-        log.info("not much happening here.  someone should rewrite this part of the code.")
+                        # Unpack the message length
+                        msg_size = struct.unpack('!L', length_data)[0]
 
-                            
-    
+                        # Receive the full message
+                        buffer = b""
+                        while len(buffer) < msg_size:
+                            extra = source.recv(msg_size - len(buffer))
+                            if not extra:
+                                log.error("Client disconnected")
+                                clientList.remove(source)
+                                source.close()
+                                continue 
+                            buffer += extra
+
+                        # Parse the message
+                        message = UnencryptedIMMessage()
+                        message.parseJSON(buffer)
+                        log.info(f"Received: {message}")
+
+                        if message.msg.lower() == "quit":  # Client wants to disconnect
+                            log.info(f"Client {source.getpeername()} disconnected.")
+                            clientList.remove(source)  # Remove this client from the list
+                            source.close()  # Close this client's socket
+                            continue
+                        
+                        # Broadcast the message to all other clients
+                        packed_size, json_data = message.serialize()
+                        for client in clientList:
+                            if client is not source:
+                                try:
+                                    client.sendall(packed_size + json_data)
+                                except Exception as e:
+                                    log.error(f"Error sending to a client: {e}")
+                                    clientList.remove(client)
+                                    client.close()
+                    except ConnectionResetError as e:
+                        # Handle client disconnection
+                        log.warning(f"Client disconnected: {e}")
+                        clientList.remove(source)
+                        source.close()
+
+    except KeyboardInterrupt:
+        log.info("Shut down time!")  
+    finally:
+        # Close all connections
+        for c in clientList:
+            c.close()
+        serverSock.close()
+   
 
 if __name__ == "__main__":
     exit(main())
