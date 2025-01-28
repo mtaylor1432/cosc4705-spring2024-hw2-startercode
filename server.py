@@ -38,79 +38,102 @@ def main():
     log.setLevel(level)
     log.info(f"running with {args}")
     
-    log.debug("waiting for new clients...")
+    # log.debug("waiting for new clients...")
+    # socket.socket creates a new socket object and binds it to the specified port
     serverSock = socket.socket(socket.AF_INET,socket.SOCK_STREAM)
     serverSock.bind(("",args.port))
+    # this can hold maximum number of clients
     serverSock.listen()
 
+    # holds the list of clients connected to the server
     clientList = []
 
     try:
         while True:
             
+            # select.select() is used to wait until there is data to read from a socket
             readable, _, _ = select.select([serverSock] + clientList, [], [])
 
+            # loop through all the sockets that are readable
             for source in readable:
                 # new connection coming
                 if source == serverSock:
                     c, addr = serverSock.accept()
                     log.info(f"New client connected: {addr}")
                     clientList.append(c)
+                # existing client sending a message
                 else:
                     
                     try:
                         # Receive the message length
                         length_data = source.recv(4)
+                        # If the client disconnected for any reason
                         if not length_data:
                             log.error("Client disconnected")
                             clientList.remove(source)
                             source.close()
                             continue
+                        # If the message length is less than 4 bytes, it is incomplete
                         if len(length_data) < 4:
                             log.error("Incomplete message length received")
+                            # remember: continue command is used to skip the rest of the code inside the loop for the current iteration
                             continue
 
-                        # Unpack the message length
+                        # Unpack the message length to convert it to an integer
                         msg_size = struct.unpack('!L', length_data)[0]
 
                         # Receive the full message
+                        # buffer is used to store the message
                         buffer = b""
+                        # While the buffer is less than the message size, keep receiving data
                         while len(buffer) < msg_size:
+                            # extra is used to store the data received
                             extra = source.recv(msg_size - len(buffer))
+                            # If the client disconnected for any reason
                             if not extra:
                                 log.error("Client disconnected")
                                 clientList.remove(source)
                                 source.close()
+                                # continue command again!
                                 continue 
+                            # Add the received data to the buffer
                             buffer += extra
 
-                        # Parse the message
+                        # Parse the message using message.py
                         message = UnencryptedIMMessage()
+                        # parsing means to convert the data into a format that the program can understand
                         message.parseJSON(buffer)
-                        log.info(f"Received: {message}")
+                        # log.info(f"Received: {message}")
 
-                        if message.msg.lower() == "quit":  # Client wants to disconnect
+                        # If the message is "quit", the client wants to disconnect
+                        if message.msg.lower() == "quit":  
                             log.info(f"Client {source.getpeername()} disconnected.")
-                            clientList.remove(source)  # Remove this client from the list
-                            source.close()  # Close this client's socket
+                            # Remove this client from the list
+                            clientList.remove(source)
+                            # Close this client's socket  
+                            source.close()  
                             continue
                         
-                        # Broadcast the message to all other clients
+                        # Broadcast the message to all other clients with serialized message which is the packed size and json data??
                         packed_size, json_data = message.serialize()
                         for client in clientList:
+                            # only send to clients that are not the source
                             if client is not source:
                                 try:
+                                    # sendall sends the message to the client
                                     client.sendall(packed_size + json_data)
+                                # If there is an error sending to a client, remove the client from the list and close the connection
                                 except Exception as e:
                                     log.error(f"Error sending to a client: {e}")
                                     clientList.remove(client)
                                     client.close()
+                    # If there is an error receiving the message, remove the client from the list and close the connection
                     except ConnectionResetError as e:
                         # Handle client disconnection
                         log.warning(f"Client disconnected: {e}")
                         clientList.remove(source)
                         source.close()
-
+    # If the server is shut down, close all connections and the server socket
     except KeyboardInterrupt:
         log.info("Shut down time!")  
     finally:
@@ -119,7 +142,6 @@ def main():
             c.close()
         serverSock.close()
    
-
 if __name__ == "__main__":
     exit(main())
 
